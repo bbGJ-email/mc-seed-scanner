@@ -40,10 +40,11 @@ def create_release(tag: str, name: str, body: str) -> dict:
     return _req(f"{BASE}/releases", data=json.dumps(payload).encode("utf-8"), method="POST")
 
 
-def upload_asset(release_id: int, zip_path: str, asset_name: str) -> dict:
+def upload_asset(upload_url: str, zip_path: str, asset_name: str) -> dict:
     with open(zip_path, "rb") as f:
         data = f.read()
-    url = f"{BASE}/releases/{release_id}/assets?name={urllib.parse.quote(asset_name)}"
+    # upload_url 形如 https://uploads.github.com/repos/.../releases/{id}/assets{?name,label}
+    url = upload_url.replace("{?name,label}", "") + f"?name={urllib.parse.quote(asset_name)}"
     return _req(url, data=data, headers={"Content-Type": "application/zip"},
                 method="POST")
 
@@ -68,13 +69,14 @@ def main():
     print(f"[1/2] 创建 Release {tag} ...")
     rel = create_release(tag, name, body)
     rid = rel.get("id")
-    if not rid:
+    upload_url = rel.get("upload_url", "")
+    if not rid or not upload_url:
         print("[错误] 创建 Release 失败:", rel.get("message", rel))
         sys.exit(1)
     print(f"      Release id={rid} url={rel.get('html_url')}")
     print(f"[2/2] 上传源码包 {asset_name} ({os.path.getsize(zip_path)//1024} KB) ...")
     try:
-        a = upload_asset(rid, zip_path, asset_name)
+        a = upload_asset(upload_url, zip_path, asset_name)
         print(f"      上传成功: {a.get('browser_download_url')}")
     except urllib.error.HTTPError as e:
         print(f"[错误] 上传失败 HTTP {e.code}: {e.read().decode('utf-8','replace')[:300]}")

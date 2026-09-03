@@ -63,7 +63,11 @@ class UpdaterConfig:
 
 
 def _api_get(url: str, timeout: int = 20) -> dict:
-    req = urllib.request.Request(url, headers={"User-Agent": "mc-seed-scanner", "Accept": "application/vnd.github+json"})
+    headers = {"User-Agent": "mc-seed-scanner", "Accept": "application/vnd.github+json"}
+    token = os.environ.get("GH_TOKEN", "").strip()
+    if token:
+        headers["Authorization"] = f"token {token}"
+    req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read().decode("utf-8"))
 
