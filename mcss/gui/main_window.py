@@ -29,11 +29,13 @@ from PyQt5.QtWidgets import (
 from .. import core_binding as cb
 from ..config import ScanOptions, PRESETS
 from ..database import SeedDatabase
-from ..paths import get_data_dir
+from ..paths import get_base_dir, get_data_dir
 from ..task_manager import TaskManager
 from ..scoring import TIERS
 from .. import exporters
 from ..ai_intro import AIConfig, AIIntroGenerator
+from .. import __version__ as APP_VERSION
+from .. import updater
 
 DATA_DIR = get_data_dir()
 
@@ -79,6 +81,8 @@ class Signals(QObject):
     error = pyqtSignal(str)
     recommend = pyqtSignal(dict)
     intro_done = pyqtSignal(dict)
+    update_check = pyqtSignal(dict)
+    update_done = pyqtSignal(dict)
 
 
 # ===========================================================================
@@ -234,6 +238,19 @@ class ConfigPanel(QWidget):
         af.addRow("介绍评分阈值", self.ai_threshold)
         af.addRow("最低等级", self.ai_tier)
         lay.addWidget(ai_box)
+
+        # ---- 自动更新 ----
+        up_box = QGroupBox("自动更新")
+        uf = QFormLayout(up_box)
+        self.up_check_on_start = QCheckBox("启动时自动检查更新")
+        self.btn_check_update = QPushButton("立即检查更新")
+        self.up_status = QLabel("")
+        self.up_status.setWordWrap(True)
+        self.up_status.setStyleSheet("color:#666;")
+        uf.addRow("", self.up_check_on_start)
+        uf.addRow("", self.btn_check_update)
+        uf.addRow("", self.up_status)
+        lay.addWidget(up_box)
 
         lay.addStretch(1)
 
@@ -683,8 +700,17 @@ class MainWindow(QMainWindow):
         self.tm.recommend_filter = self._recommend_filter
         self.signals.recommend.connect(self._on_recommend)
         self.signals.intro_done.connect(self._on_intro_done)
+        self.signals.update_check.connect(self._on_update_check)
+        self.signals.update_done.connect(self._on_update_done)
+        # 自动更新
+        from ..updater import UpdaterConfig
+        self.updater_cfg = UpdaterConfig.load(os.path.join(DATA_DIR, "updater_config.json"))
 
         self._build_ui()
+
+        # 启动时自动检查更新（后台，不阻塞）
+        if self.updater_cfg.check_on_start:
+            QTimer.singleShot(1500, self._check_update_now)
 
         # 定时刷新监控（防卡顿，低频轮询）
         self._timer = QTimer(self)
@@ -756,6 +782,8 @@ class MainWindow(QMainWindow):
         self.config_panel.ai_model.setText(self.ai_cfg.model)
         self.config_panel.ai_threshold.setValue(self.ai_cfg.intro_threshold)
         self.config_panel.ai_tier.setCurrentText(self.ai_cfg.min_tier)
+        self.config_panel.up_check_on_start.setChecked(self.updater_cfg.check_on_start)
+        self.config_panel.btn_check_update.clicked.connect(self._check_update_now)
 
         split.addWidget(scroll)
         split.addWidget(tabs)
@@ -783,6 +811,44 @@ class MainWindow(QMainWindow):
         cfg.save(os.path.join(DATA_DIR, "ai_config.json"))
         self.ai_cfg = cfg
         self.ai_gen.config = cfg
+
+    def _check_update_now(self):
+        """手动检查更新。"""
+        self.config_panel.up_status.setText("正在检查更新...")
+        threading.Thread(target=self._check_update_worker, daemon=True).start()
+
+    def _check_update_worker(self):
+        has, rel, msg = updater.check_update(APP_VERSION)
+        self.signals.update_check.emit({"has": has, "rel": rel, "msg": msg})
+
+    def _on_update_check(self, info: dict):
+        self.config_panel.up_status.setText(info["msg"])
+        if not info["has"]:
+            QMessageBox.information(self, "检查更新", info["msg"])
+            return
+        ret = QMessageBox.question(
+            self, "发现新版本",
+            info["msg"] + "\n\n是否立即下载并更新？（将保留 data/tools/venv，随后自动重新构建）",
+            QMessageBox.Yes | QMessageBox.No)
+        if ret == QMessageBox.Yes:
+            self.config_panel.up_status.setText("正在下载更新...")
+            threading.Thread(target=self._do_update_worker,
+                             args=(info["rel"],), daemon=True).start()
+
+    def _do_update_worker(self, rel: dict):
+        project_root = get_base_dir()
+        res = updater.do_update(project_root, rel,
+                                os.path.join(DATA_DIR, "update_cache.zip"))
+        self.signals.update_done.emit(res)
+
+    def _on_update_done(self, res: dict):
+        if res.get("ok"):
+            self.config_panel.up_status.setText(res["message"])
+            QMessageBox.information(self, "更新完成", res["message"])
+        else:
+            self.config_panel.up_status.setText(res.get("message", "更新失败"))
+            QMessageBox.critical(self, "更新失败",
+                                 f"[{res.get('step', '')}] {res.get('message', '')}")
 
     def _recommend_filter(self, rec: dict) -> bool:
         cfg = self._ai_config_from_panel()
@@ -965,6 +1031,11 @@ class MainWindow(QMainWindow):
             self.tm.stop()
         try:
             self._save_ai_config()
+        except Exception:
+            pass
+        try:
+            self.updater_cfg.check_on_start = self.config_panel.up_check_on_start.isChecked()
+            self.updater_cfg.save(os.path.join(DATA_DIR, "updater_config.json"))
         except Exception:
             pass
         try:
