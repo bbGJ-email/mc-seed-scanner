@@ -81,7 +81,7 @@ if not exist cubiomes\libcubiomes.a (
     cd ..
 )
 echo    -- building scanner_core.dll ...
-"%GCC%" -O3 -fPIC -U_FORTIFY_SOURCE -shared -o scanner_core.dll scanner_core.c cubiomes\libcubiomes.a -lm -lpthread || goto :err
+"%GCC%" -O3 -fPIC -U_FORTIFY_SOURCE -shared -o scanner_core.dll scanner_core.c cubiomes\libcubiomes.a -lm -static-libgcc -Wl,-Bstatic -lpthread -Wl,-Bdynamic || goto :err
 cd ..
 
 echo [4/5] Installing Python dependencies ...
