@@ -84,14 +84,19 @@ echo    -- building scanner_core.dll ...
 "%GCC%" -O3 -fPIC -U_FORTIFY_SOURCE -shared -o scanner_core.dll scanner_core.c cubiomes\libcubiomes.a -lm -static-libgcc -Wl,-Bstatic -lpthread -Wl,-Bdynamic || goto :err
 cd ..
 
-echo [4/5] Installing Python dependencies ...
-python -m pip install -r requirements.txt || goto :err
+echo [4/5] Creating Python venv and installing dependencies ...
+if not exist "venv\Scripts\python.exe" (
+    echo    -- creating virtual environment .\venv ...
+    python -m venv venv || goto :err
+)
+set "PY=%~dp0venv\Scripts\python.exe"
+"%PY%" -m pip install -r requirements.txt || goto :err
 
 echo [5/5] Running core self-check ...
-python -c "from mcss import core_binding; print('core_binding OK:', core_binding._lib._name)" || goto :err
+"%PY%" -c "from mcss import core_binding; print('core_binding OK:', core_binding._lib._name)" || goto :err
 
 echo Packaging single-file EXE with PyInstaller ...
-python -m PyInstaller --noconfirm --clean --onefile --windowed ^
+"%PY%" -m PyInstaller --noconfirm --clean --onefile --windowed ^
     --name "MCSeedScanner" ^
     --add-binary "csrc\scanner_core.dll;csrc" ^
     --add-data "csrc\cubiomes;csrc\cubiomes" ^
