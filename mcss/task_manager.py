@@ -14,6 +14,7 @@ import logging
 import os
 import threading
 import time
+from dataclasses import replace
 from typing import Callable, Optional
 
 from . import core_binding as cb
@@ -50,6 +51,15 @@ class TaskManager:
         self._writer: Optional[threading.Thread] = None
         self._done_event = threading.Event()
         self._db_lock = threading.Lock()
+        # 持续扫描模式
+        self._continuous = False
+        self._window = 1_000_000
+        self._overall_end = 0
+        self._base_options = None
+        # 智能推荐回调（扫描命中入库后，满足过滤条件时触发）
+        self.on_recommend_cb = None
+        self.recommend_filter = None
+        self._rec_lock = threading.Lock()
 
         # 事件回调（供 GUI 刷新）
         self.on_hit_cb: Optional[Callable[[dict], None]] = None
@@ -112,6 +122,23 @@ class TaskManager:
                 self._running = False
             self._log(f"任务启动失败: {e}", level=logging.ERROR)
             self._notify_error(f"任务启动失败: {e}")
+
+    def start_continuous(self, options: ScanOptions, total_limit: int = 0,
+                         resume: bool = True):
+        """启动持续扫描（挂机模式）。
+
+        直接把扫描区间扩展为超大范围，由 C 端持续运行直到用户停止；
+        断点续扫自动兜底（重启后从上次位置继续）。
+        total_limit>0 时限定为 [seed_start, seed_start+total_limit)。
+        """
+        overall_end = options.seed_end
+        if total_limit and total_limit > 0:
+            overall_end = min(overall_end, options.seed_start + int(total_limit))
+        else:
+            overall_end = max(overall_end, options.seed_start + 10_000_000_000)
+        self._continuous = True
+        o2 = replace(options, seed_end=overall_end)
+        self.start(o2, resume)
 
     def _start_task(self, options: ScanOptions, resume: bool):
         start_seed = options.seed_start
@@ -220,7 +247,7 @@ class TaskManager:
     def _writer_loop(self):
         """写入线程：消费命中队列 → 复核(线程池) → 评分 → 入库 → 通知 GUI。"""
         import concurrent.futures
-        n_workers = max(1, min(4, self._scanner.options.effective_threads()))
+        n_workers = max(1, min(8, self._scanner.options.effective_threads() * 2))
         pool = concurrent.futures.ThreadPoolExecutor(max_workers=n_workers)
         while True:
             rec = self._hit_queue.get()
@@ -278,6 +305,14 @@ class TaskManager:
                 self.on_hit_cb(scored)
             except Exception:
                 pass
+        # 智能推荐：入库成功后，满足过滤条件则触发推荐回调（AI 介绍生成等）
+        if inserted and self.on_recommend_cb:
+            try:
+                if self.recommend_filter is None or self.recommend_filter(scored):
+                    with self._rec_lock:
+                        self.on_recommend_cb(scored)
+            except Exception:
+                pass
 
     def _handle_finish(self, rc: int):
         sc = self._scanner
@@ -304,6 +339,7 @@ class TaskManager:
         if self.on_finish_cb:
             self.on_finish_cb({"rc": rc, "processed": processed, "hits": hits,
                                "duration": duration, "status": status})
+        self._continuous = False
 
     def _handle_error(self, msg: str):
         self._log(f"扫描错误: {msg}", level=logging.ERROR)

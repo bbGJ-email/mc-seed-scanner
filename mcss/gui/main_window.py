@@ -33,6 +33,7 @@ from ..paths import get_data_dir
 from ..task_manager import TaskManager
 from ..scoring import TIERS
 from .. import exporters
+from ..ai_intro import AIConfig, AIIntroGenerator
 
 DATA_DIR = get_data_dir()
 
@@ -76,6 +77,8 @@ class Signals(QObject):
     status = pyqtSignal(dict)
     finished = pyqtSignal(dict)
     error = pyqtSignal(str)
+    recommend = pyqtSignal(dict)
+    intro_done = pyqtSignal(dict)
 
 
 # ===========================================================================
@@ -198,6 +201,39 @@ class ConfigPanel(QWidget):
         mf.addRow("地形半径", self.terrain_radius)
         mf.addRow("", self.check_slime)
         lay.addWidget(misc_box)
+
+        # ---- AI 智能推荐 / 持续扫描 ----
+        ai_box = QGroupBox("AI 智能推荐 / 持续扫描")
+        af = QFormLayout(ai_box)
+        self.continuous = QCheckBox("持续扫描（挂机模式，自动连续扫描）")
+        self.window_m = QSpinBox()
+        self.window_m.setRange(0, 100000)
+        self.window_m.setValue(0)
+        self.window_m.setSpecialValueText("无限（直到手动停止）")
+        self.window_m.setSuffix(" 百万个种子上限")
+        self.ai_enabled = QCheckBox("启用 AI 生成种子介绍（OpenAI 兼容接口）")
+        self.ai_base_url = QLineEdit("https://api.openai.com/v1")
+        self.ai_base_url.setPlaceholderText("https://api.openai.com/v1")
+        self.ai_api_key = QLineEdit()
+        self.ai_api_key.setEchoMode(QLineEdit.Password)
+        self.ai_api_key.setPlaceholderText("sk-...")
+        self.ai_model = QLineEdit("gpt-4o-mini")
+        self.ai_model.setPlaceholderText("模型名，如 gpt-4o-mini / deepseek-chat")
+        self.ai_threshold = QSpinBox()
+        self.ai_threshold.setRange(0, 100)
+        self.ai_threshold.setValue(75)
+        self.ai_tier = QComboBox()
+        self.ai_tier.addItems(["S+", "S", "A", "B", "C"])
+        self.ai_tier.setCurrentText("S")
+        af.addRow("", self.continuous)
+        af.addRow("扫描上限", self.window_m)
+        af.addRow("", self.ai_enabled)
+        af.addRow("API 地址", self.ai_base_url)
+        af.addRow("API Key", self.ai_api_key)
+        af.addRow("模型", self.ai_model)
+        af.addRow("介绍评分阈值", self.ai_threshold)
+        af.addRow("最低等级", self.ai_tier)
+        lay.addWidget(ai_box)
 
         lay.addStretch(1)
 
@@ -541,6 +577,80 @@ class TaskLogTab(QWidget):
 
 
 # ===========================================================================
+# 智能推荐
+# ===========================================================================
+class RecommendTab(QWidget):
+    """智能推荐：高分/高等级种子 + AI 生成介绍。"""
+    def __init__(self, db: SeedDatabase, parent=None):
+        super().__init__(parent)
+        self.db = db
+        self.on_regen = None      # MainWindow 注入：on_regen(seed) -> None
+        self.on_cleared = None
+        lay = QVBoxLayout(self)
+        bar = QHBoxLayout()
+        self.btn_refresh = QPushButton("刷新")
+        self.btn_refresh.clicked.connect(self.refresh)
+        self.btn_regen = QPushButton("重新生成选中介绍")
+        self.btn_regen.clicked.connect(self._regen_selected)
+        self.btn_clear = QPushButton("清空介绍")
+        self.btn_clear.clicked.connect(self._clear)
+        self.lbl = QLabel("按智能规则挑选的高分/高等级种子")
+        for b in (self.btn_refresh, self.btn_regen, self.btn_clear):
+            bar.addWidget(b)
+        bar.addStretch(1)
+        bar.addWidget(self.lbl)
+        lay.addLayout(bar)
+        self.min_score = 75
+        self.tiers = ["S+", "S", "A"]
+        self.table = QTableWidget()
+        self.table.setColumnCount(8)
+        self.table.setHorizontalHeaderLabels(
+            ["种子", "版本", "评分", "等级", "标签", "状态", "AI 介绍", "更新时间"])
+        self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.Stretch)
+        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.setSelectionMode(QTableWidget.SingleSelection)
+        lay.addWidget(self.table)
+        self.refresh()
+
+    def set_rows(self, rows: list):
+        self.table.setRowCount(0)
+        for rec in rows:
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+            status = rec.get("intro_status") or "待生成"
+            if status == "error":
+                status = f"失败:{(rec.get('intro_error') or '')[:40]}"
+            items = [
+                str(rec["seed"]), rec.get("mc_version", ""), str(rec.get("score", 0)),
+                rec.get("tier", ""), "、".join(rec.get("tags", []))[:60],
+                status, rec.get("intro") or "（暂无介绍）",
+                rec.get("intro_updated") or "",
+            ]
+            for c, it in enumerate(items):
+                self.table.setItem(row, c, QTableWidgetItem(it))
+
+    def refresh(self):
+        rows = self.db.recommend_candidates(min_score=self.min_score,
+                                            tier_whitelist=self.tiers, limit=200)
+        self.set_rows(rows)
+
+    def _regen_selected(self):
+        if self.on_regen is None:
+            return
+        row = self.table.currentRow()
+        if row < 0:
+            return
+        seed = int(self.table.item(row, 0).text())
+        self.on_regen(seed)
+
+    def _clear(self):
+        if self.on_cleared is None:
+            return
+        self.on_cleared()
+
+
+# ===========================================================================
 # 主窗口
 # ===========================================================================
 class MainWindow(QMainWindow):
@@ -566,6 +676,13 @@ class MainWindow(QMainWindow):
         self.signals.status.connect(self._on_status)
         self.signals.finished.connect(self._on_finished)
         self.signals.error.connect(self._on_error)
+        # AI 智能推荐
+        self.ai_cfg = AIConfig.load(os.path.join(DATA_DIR, "ai_config.json"))
+        self.ai_gen = AIIntroGenerator(self.ai_cfg)
+        self.tm.on_recommend_cb = self.signals.recommend.emit
+        self.tm.recommend_filter = self._recommend_filter
+        self.signals.recommend.connect(self._on_recommend)
+        self.signals.intro_done.connect(self._on_intro_done)
 
         self._build_ui()
 
@@ -624,8 +741,21 @@ class MainWindow(QMainWindow):
         tabs.addTab(hits_wrap, "实时命中")
         self.db_tab = DatabaseTab(self.db)
         tabs.addTab(self.db_tab, "种子数据库")
+        self.recommend_tab = RecommendTab(self.db)
+        self.recommend_tab.on_regen = self._regen_intro
+        self.recommend_tab.on_cleared = self._clear_intros
+        tabs.addTab(self.recommend_tab, "智能推荐")
+        self._sync_recommend_threshold()
         self.log_tab = TaskLogTab(self.db)
         tabs.addTab(self.log_tab, "任务日志")
+        # 把已保存的 AI 配置同步到面板
+        self.config_panel.continuous.setChecked(False)
+        self.config_panel.ai_enabled.setChecked(self.ai_cfg.enabled)
+        self.config_panel.ai_base_url.setText(self.ai_cfg.base_url)
+        self.config_panel.ai_api_key.setText(self.ai_cfg.api_key)
+        self.config_panel.ai_model.setText(self.ai_cfg.model)
+        self.config_panel.ai_threshold.setValue(self.ai_cfg.intro_threshold)
+        self.config_panel.ai_tier.setCurrentText(self.ai_cfg.min_tier)
 
         split.addWidget(scroll)
         split.addWidget(tabs)
@@ -638,6 +768,33 @@ class MainWindow(QMainWindow):
         o.checkpoint_dir = os.path.join(DATA_DIR, "checkpoints")
         return o
 
+    def _ai_config_from_panel(self) -> AIConfig:
+        c = AIConfig()
+        c.enabled = self.config_panel.ai_enabled.isChecked()
+        c.base_url = self.config_panel.ai_base_url.text().strip() or AIConfig().base_url
+        c.api_key = self.config_panel.ai_api_key.text().strip()
+        c.model = self.config_panel.ai_model.text().strip() or "gpt-4o-mini"
+        c.intro_threshold = self.config_panel.ai_threshold.value()
+        c.min_tier = self.config_panel.ai_tier.currentText()
+        return c
+
+    def _save_ai_config(self):
+        cfg = self._ai_config_from_panel()
+        cfg.save(os.path.join(DATA_DIR, "ai_config.json"))
+        self.ai_cfg = cfg
+        self.ai_gen.config = cfg
+
+    def _recommend_filter(self, rec: dict) -> bool:
+        cfg = self._ai_config_from_panel()
+        return cfg.should_recommend(rec.get("score", 0), rec.get("tier", ""))
+
+    def _sync_recommend_threshold(self):
+        """推荐页展示阈值与 AI 配置面板联动。"""
+        self.recommend_tab.min_score = self.config_panel.ai_threshold.value()
+        order = ["S+", "S", "A", "B", "C"]
+        mt = self.config_panel.ai_tier.currentText()
+        self.recommend_tab.tiers = order[:order.index(mt) + 1] if mt in order else ["S+", "S", "A"]
+
     def start_scan(self):
         if self.tm.running:
             return
@@ -647,8 +804,14 @@ class MainWindow(QMainWindow):
             if errs:
                 QMessageBox.warning(self, "配置错误", "\n".join(errs))
                 return
+            self._save_ai_config()
             self.hits_table.setRowCount(0)
-            self.tm.start(o, resume=False)
+            self.recommend_tab.refresh()
+            if self.config_panel.continuous.isChecked():
+                total = self.config_panel.window_m.value() * 1_000_000
+                self.tm.start_continuous(o, total_limit=total, resume=False)
+            else:
+                self.tm.start(o, resume=False)
             self._set_running_ui(True)
         except Exception as e:
             QMessageBox.critical(self, "启动失败", str(e))
@@ -734,6 +897,47 @@ class MainWindow(QMainWindow):
     def _on_hit(self, rec: dict):
         self.hits_table.add_hit(rec)
 
+    def _on_recommend(self, rec: dict):
+        """扫描命中满足推荐规则时触发：实时生成 AI 介绍 + 刷新推荐页。"""
+        cfg = self._ai_config_from_panel()
+        seed = rec.get("seed")
+        if cfg.enabled and cfg.is_configured() and seed is not None:
+            self.db.set_intro(seed, status="generating")
+            self.ai_gen.submit(rec, lambda r, intro, err, seed=seed: self.signals.intro_done.emit(
+                {"seed": seed, "intro": intro, "error": err}))
+        self._sync_recommend_threshold()
+        self.recommend_tab.refresh()
+
+    def _on_intro_done(self, info: dict):
+        seed = info["seed"]
+        if info.get("intro"):
+            self.db.set_intro(seed, intro=info["intro"], model=self.ai_cfg.model,
+                              status="done", error="")
+        else:
+            self.db.set_intro(seed, status="error",
+                              error=info.get("error") or "生成失败")
+        self.recommend_tab.refresh()
+
+    def _regen_intro(self, seed: int):
+        """手动重新生成选中种子的介绍。"""
+        rec = self.db.get(seed)
+        if not rec:
+            return
+        cfg = self._ai_config_from_panel()
+        if not (cfg.enabled and cfg.is_configured()):
+            QMessageBox.information(self, "AI 未启用",
+                                    "请先在左侧勾选「启用 AI 生成种子介绍」并填写 API 配置")
+            return
+        self.db.set_intro(seed, status="generating")
+        self.ai_gen.submit(rec, lambda r, intro, err, seed=seed: self.signals.intro_done.emit(
+            {"seed": seed, "intro": intro, "error": err}))
+        self.recommend_tab.refresh()
+
+    def _clear_intros(self):
+        n = self.db.clear_intros()
+        self.recommend_tab.refresh()
+        QMessageBox.information(self, "清空介绍", f"已清空 {n} 条 AI 介绍，刷新后按规则重新生成")
+
     def _on_status(self, s: dict):
         self.monitor.update_status(s)
 
@@ -759,6 +963,14 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
             self.tm.stop()
+        try:
+            self._save_ai_config()
+        except Exception:
+            pass
+        try:
+            self.ai_gen.shutdown()
+        except Exception:
+            pass
         try:
             self.db.close()
         except Exception:

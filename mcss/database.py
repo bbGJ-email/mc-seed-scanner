@@ -62,6 +62,15 @@ CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT
 );
+CREATE TABLE IF NOT EXISTS seed_intros (
+    seed INTEGER PRIMARY KEY,
+    intro TEXT,
+    model TEXT,
+    status TEXT DEFAULT 'pending',
+    error TEXT,
+    updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_intros_status ON seed_intros(status);
 """
 
 
@@ -226,6 +235,79 @@ class SeedDatabase:
             row = self.conn.execute(
                 "SELECT value FROM settings WHERE key=?", (key,)).fetchone()
             return row[0] if row else default
+
+
+
+    # ------------------------------------------------------------------
+    # AI 种子介绍
+    # ------------------------------------------------------------------
+    def set_intro(self, seed: int, intro: str = "", model: str = "",
+                  status: str = "done", error: str = "") -> None:
+        """写入/更新种子介绍（upsert）。"""
+        with self._lock:
+            self.conn.execute(
+                """INSERT INTO seed_intros(seed, intro, model, status, error, updated_at)
+                   VALUES (?,?,?,?,?,?)
+                   ON CONFLICT(seed) DO UPDATE SET
+                     intro=excluded.intro, model=excluded.model,
+                     status=excluded.status, error=excluded.error,
+                     updated_at=excluded.updated_at""",
+                (int(seed), intro, model, status, error,
+                 time.strftime("%Y-%m-%d %H:%M:%S")))
+            self.conn.commit()
+
+    def get_intro(self, seed: int) -> Optional[dict]:
+        with self._lock:
+            cur = self.conn.execute(
+                "SELECT seed, intro, model, status, error, updated_at "
+                "FROM seed_intros WHERE seed=?", (int(seed),))
+            r = cur.fetchone()
+            if not r:
+                return None
+            cols = ["seed", "intro", "model", "status", "error", "updated_at"]
+            return dict(zip(cols, r))
+
+    def recommend_candidates(self, min_score: int = 75,
+                             tier_whitelist: Optional[List[str]] = None,
+                             limit: int = 100) -> List[dict]:
+        """按智能推荐规则查询候选种子（高分或高等级），带介绍状态。"""
+        tiers = tier_whitelist or ["S+", "S", "A"]
+        ph = ",".join("?" * len(tiers))
+        with self._lock:
+            cur = self.conn.execute(
+                f"""SELECT s.*, i.intro AS intro, i.status AS intro_status,
+                           i.error AS intro_error, i.model AS intro_model,
+                           i.updated_at AS intro_updated
+                    FROM seeds s LEFT JOIN seed_intros i ON s.seed = i.seed
+                    WHERE s.score >= ? OR s.tier IN ({ph})
+                    ORDER BY s.score DESC, s.id DESC LIMIT ?""",
+                [min_score, *tiers, int(limit)])
+            rows = []
+            for r in cur.fetchall():
+                rec = self._row_to_dict(r[:22])  # seeds 列
+                rec["intro"] = r[22]
+                rec["intro_status"] = r[23]
+                rec["intro_error"] = r[24]
+                rec["intro_model"] = r[25]
+                rec["intro_updated"] = r[26]
+                rows.append(rec)
+            return rows
+
+    def intros_pending(self, limit: int = 200) -> List[int]:
+        """返回所有尚未生成介绍的种子号（供批量补生成）。"""
+        with self._lock:
+            cur = self.conn.execute(
+                """SELECT s.seed FROM seeds s
+                   LEFT JOIN seed_intros i ON s.seed = i.seed
+                   WHERE i.seed IS NULL OR i.status = 'error'
+                   ORDER BY s.score DESC LIMIT ?""", (int(limit),))
+            return [r[0] for r in cur.fetchall()]
+
+    def clear_intros(self) -> int:
+        with self._lock:
+            cur = self.conn.execute("DELETE FROM seed_intros")
+            self.conn.commit()
+            return cur.rowcount
 
     def set_setting(self, key: str, value: str):
         with self._lock:
