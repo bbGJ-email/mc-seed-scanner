@@ -188,3 +188,16 @@ deep_dark=183 mangrove_swamp=184 cherry_grove=185 pale_garden=186`
 | 扫描很快结束但没有命中 | 检查筛选条件是否过于严苛，先放宽结构半径 / 群系要求 |
 | 打包后 EXE 报缺 DLL | 确认 `scanner_core.dll` 已通过 `--add-binary` 打入，且 MinGW 使用 UCRT 运行时 |
 | 断点续扫不生效 | 任务名 / 版本 / 区间必须与上次完全一致 |
+
+---
+
+## License
+
+本项目采用 **GNU GPL v3.0**（GNU General Public License v3.0）。
+
+原因：底层世界生成引擎 [Cubiomes](https://github.com/Cubitect/cubiomes) 使用 GPL-3.0 协议，
+本项目静态链接其源码，故整体以 GPL-3.0 授权，保持协议兼容。
+
+Copyright (c) 2026 bbGJ-email
+
+完整条款见 [LICENSE](LICENSE) 文件。
