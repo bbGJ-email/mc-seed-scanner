@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import threading
@@ -72,7 +73,11 @@ class TaskManager:
     # 断点续扫
     # ------------------------------------------------------------------
     def _checkpoint_path(self, options: ScanOptions) -> str:
-        return os.path.join(self.checkpoint_dir, "scan.ckpt")
+        # 按任务特征隔离断点文件：同一配置重启可续扫，不同配置互不干扰
+        key = hashlib.md5(
+            f"{options.task_name}|{options.version}|{options.seed_start}|{options.seed_end}".encode("utf-8")
+        ).hexdigest()[:10]
+        return os.path.join(self.checkpoint_dir, f"scan_{key}.ckpt")
 
     def read_checkpoint(self, options: ScanOptions) -> Optional[int]:
         """读取断点；返回断点种子或 None。"""

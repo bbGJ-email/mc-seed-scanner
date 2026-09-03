@@ -11,6 +11,7 @@ from typing import Callable, Optional
 
 from . import core_binding as cb
 from .config import ScanOptions, build_scanner_config
+from .paths import get_data_dir
 
 
 def parse_hit_line(line: str) -> Optional[dict]:
@@ -85,7 +86,7 @@ class Scanner:
 
         # 命中输出：优先文件追加（跨平台，规避 Windows CRT fd 兼容问题）
         self.out_path = out_path or os.path.join(
-            os.path.dirname(checkpoint_path) if checkpoint_path else "data",
+            os.path.dirname(checkpoint_path) if checkpoint_path else get_data_dir(),
             "hits.tmp")
         self.cfg.out_path = self.out_path.encode("utf-8")
         self.cfg.out_fd = -1

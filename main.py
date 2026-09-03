@@ -19,6 +19,7 @@ sys.path.insert(0, APP_DIR)
 
 import mcss
 from mcss import ScanOptions, SeedDatabase, TaskManager
+from mcss.paths import get_data_dir
 
 
 def load_config(path: str) -> dict:
@@ -64,10 +65,10 @@ def run_cli(config_path: str):
         print("配置错误:", "；".join(errs))
         sys.exit(1)
 
-    db = SeedDatabase(os.path.join(APP_DIR, "data", "seeds.db"))
+    db = SeedDatabase(os.path.join(get_data_dir(), "seeds.db"))
     tm = TaskManager(db,
-                     log_dir=os.path.join(APP_DIR, "data", "logs"),
-                     checkpoint_dir=os.path.join(APP_DIR, "data", "checkpoints"),
+                     log_dir=os.path.join(get_data_dir(), "logs"),
+                     checkpoint_dir=os.path.join(get_data_dir(), "checkpoints"),
                      verify=cfg.get("verify", True),
                      verify_spawn_mode=cfg.get("verify_spawn_mode", 1))
     tm.on_hit_cb = lambda rec: print(

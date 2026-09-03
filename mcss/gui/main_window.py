@@ -29,12 +29,12 @@ from PyQt5.QtWidgets import (
 from .. import core_binding as cb
 from ..config import ScanOptions, PRESETS
 from ..database import SeedDatabase
+from ..paths import get_data_dir
 from ..task_manager import TaskManager
 from ..scoring import TIERS
 from .. import exporters
 
-APP_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-DATA_DIR = os.path.join(APP_DIR, "data")
+DATA_DIR = get_data_dir()
 
 TIER_COLORS = {
     "绝版顶级神种": "#b23aee",

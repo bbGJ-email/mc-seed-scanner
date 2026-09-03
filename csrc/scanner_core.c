@@ -19,6 +19,7 @@
 
 /* 命中文件写入互斥锁（多工作线程追加写）*/
 static pthread_mutex_t g_out_lock = PTHREAD_MUTEX_INITIALIZER;
+static FILE           *g_out_fp    = NULL;  /* 命中文件常驻句柄（避免每次 open/close）*/
 
 /* --------------------------------------------------------------------------
  * 全局运行态（每次 scanner_run 重置）
@@ -423,12 +424,12 @@ static void emit_result(const ScannerConfig *cfg, const SeedResult *res)
     if (cfg->out_path[0])
     {
         pthread_mutex_lock(&g_out_lock);
-        FILE *f = fopen(cfg->out_path, "a");
-        if (f)
+        if (!g_out_fp)
+            g_out_fp = fopen(cfg->out_path, "a");
+        if (g_out_fp)
         {
-            fwrite(line, 1, (size_t)n, f);
-            fflush(f);
-            fclose(f);
+            fwrite(line, 1, (size_t)n, g_out_fp);
+            fflush(g_out_fp);
         }
         pthread_mutex_unlock(&g_out_lock);
     }
@@ -555,6 +556,7 @@ int scanner_run(const ScannerConfig *cfg)
     g_hits  = 0;
     g_batch = cfg->batch > 0 ? cfg->batch : 64;
     g_active = 1;
+    if (g_out_fp) { fclose(g_out_fp); g_out_fp = NULL; }  /* 重开命中文件（路径可能变化）*/
 
     if (g_stop)  *g_stop  = 0;
     if (g_pause) *g_pause = 0;
