@@ -54,7 +54,7 @@ if "%GCC_BIN%"=="gcc" (
     echo [OK] Using gcc: %GCC_BIN%
     for %%i in ("%GCC_BIN%") do set "GCC_DIR=%%~dpi"
     set "GCC=%GCC_BIN%"
-    if exist "%GCC_DIR%ar.exe" ( set "AR=%GCC_DIR%ar.exe" ) else ( set "AR=ar" )
+    if exist "!GCC_DIR!ar.exe" ( set "AR=!GCC_DIR!ar.exe" ) else ( set "AR=ar" )
     REM also expose the folder to this session PATH as a bonus
     set "PATH=!GCC_DIR!%PATH%"
 )
