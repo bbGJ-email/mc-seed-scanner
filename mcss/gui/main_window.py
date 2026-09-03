@@ -656,7 +656,7 @@ class RecommendTab(QWidget):
 class MainWindow(QMainWindow):
     def __init__(self, db: SeedDatabase = None, task_manager: TaskManager = None):
         super().__init__()
-        self.setWindowTitle("全自动智能 MC Java 种子扫描系统 v1.0")
+        self.setWindowTitle("全自动智能 MC Java 种子扫描系统 v1.1")
         self.resize(1280, 820)
 
         self.db = db or SeedDatabase(os.path.join(DATA_DIR, "seeds.db"))
