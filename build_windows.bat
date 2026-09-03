@@ -1,8 +1,8 @@
 @echo off
 REM ============================================================
 REM  MC Java Seed Scanner - Windows one-click build & package
-REM  Requirements: Python 3.9+ in PATH (internet needed once to
-REM  download a portable MinGW-w64 toolchain into .\tools)
+REM  Requirements: Python 3.9+ in PATH (MinGW-w64 is auto-detected
+REM  from PATH or from .\tools\mingw64, otherwise auto-downloaded)
 REM  Usage: double-click or run build_windows.bat in project root
 REM ============================================================
 setlocal enabledelayedexpansion
@@ -18,21 +18,18 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM ---------- 1. locate gcc ----------
-REM priority: system PATH gcc  ->  .\tools\mingw64\bin\gcc.exe (downloaded before)
+REM ---------- 1. locate gcc (by absolute path, no PATH dependency) ----------
 set "TOOLS_DIR=%~dp0tools"
-set "MINGW_BIN="
-where gcc >nul 2>nul && set "MINGW_BIN=gcc"
-if not defined MINGW_BIN if exist "%TOOLS_DIR%\mingw64\bin\gcc.exe" set "MINGW_BIN=%TOOLS_DIR%\mingw64\bin\gcc.exe"
+set "GCC_BIN="
+where gcc >nul 2>nul && set "GCC_BIN=gcc"
+if not defined GCC_BIN if exist "%TOOLS_DIR%\mingw64\bin\gcc.exe" set "GCC_BIN=%TOOLS_DIR%\mingw64\bin\gcc.exe"
+if not defined GCC_BIN if exist "%TOOLS_DIR%\gcc.exe" set "GCC_BIN=%TOOLS_DIR%\gcc.exe"
 
-if not defined MINGW_BIN (
+if not defined GCC_BIN (
     echo [INFO] gcc not found. Downloading portable MinGW-w64 ^(WinLibs 16.2.0, POSIX threads, ~300MB^)...
-    echo        URL: https://github.com/brechtsanders/winlibs_mingw/releases
     if not exist "%TOOLS_DIR%" mkdir "%TOOLS_DIR%"
-
     set "WL_URL=https://github.com/brechtsanders/winlibs_mingw/releases/download/16.2.0posix-14.0.0-ucrt-r1/winlibs-x86_64-posix-seh-gcc-16.2.0-mingw-w64ucrt-14.0.0-r1.zip"
     set "WL_ZIP=%TOOLS_DIR%\winlibs.zip"
-
     echo [1/5] Downloading toolchain ...
     curl.exe -L --retry 3 --connect-timeout 30 -o "!WL_ZIP!" "!WL_URL!"
     if errorlevel 1 (
@@ -41,24 +38,28 @@ if not defined MINGW_BIN (
         if errorlevel 1 goto :dlfail
     )
     if not exist "!WL_ZIP!" goto :dlfail
-
     echo [2/5] Extracting toolchain ...
     powershell -NoProfile -Command "Expand-Archive -Path '!WL_ZIP!' -DestinationPath '!TOOLS_DIR!' -Force"
     if errorlevel 1 goto :dlfail
-    if not exist "%TOOLS_DIR%\mingw64\bin\gcc.exe" goto :dlfail
-
-    set "MINGW_BIN=%TOOLS_DIR%\mingw64\bin\gcc.exe"
-    echo [OK] MinGW-w64 ready: !MINGW_BIN!
+    if exist "%TOOLS_DIR%\mingw64\bin\gcc.exe" set "GCC_BIN=%TOOLS_DIR%\mingw64\bin\gcc.exe"
 )
+if not defined GCC_BIN goto :dlfail
 
-REM add its folder to this session PATH if not a plain PATH entry
-if not "%MINGW_BIN%"=="gcc" (
-    for %%i in ("%MINGW_BIN%") do set "MINGW_BIN_DIR=%%~dpi"
-    set "PATH=!MINGW_BIN_DIR!%PATH%"
+REM ---- gcc / ar full paths ----
+if "%GCC_BIN%"=="gcc" (
+    echo [OK] Using gcc from system PATH.
+    set "GCC=gcc"
+    set "AR=ar"
+) else (
+    echo [OK] Using gcc: %GCC_BIN%
+    for %%i in ("%GCC_BIN%") do set "GCC_DIR=%%~dpi"
+    set "GCC=%GCC_BIN%"
+    if exist "%GCC_DIR%ar.exe" ( set "AR=%GCC_DIR%ar.exe" ) else ( set "AR=ar" )
+    REM also expose the folder to this session PATH as a bonus
+    set "PATH=!GCC_DIR!%PATH%"
 )
-where gcc >nul 2>nul
-if errorlevel 1 (
-    echo [ERROR] gcc still not callable. Check .\tools folder and PATH.
+if not exist "%GCC%" (
+    echo [ERROR] gcc not callable: %GCC%
     pause
     exit /b 1
 )
@@ -68,19 +69,19 @@ cd csrc
 if not exist cubiomes\libcubiomes.a (
     echo    -- building cubiomes static library ...
     cd cubiomes
-    gcc -c -O3 -fPIC -D_WIN32 -o noise.o noise.c || goto :err
-    gcc -c -O3 -fPIC -D_WIN32 -o biomes.o biomes.c || goto :err
-    gcc -c -O3 -fPIC -D_WIN32 -o layers.o layers.c || goto :err
-    gcc -c -O3 -fPIC -D_WIN32 -o biomenoise.o biomenoise.c || goto :err
-    gcc -c -O3 -fPIC -D_WIN32 -o generator.o generator.c || goto :err
-    gcc -c -O3 -fPIC -D_WIN32 -o finders.o finders.c || goto :err
-    gcc -c -O3 -fPIC -D_WIN32 -o util.o util.c || goto :err
-    gcc -c -O3 -fPIC -D_WIN32 -o quadbase.o quadbase.c || goto :err
-    ar cr libcubiomes.a *.o
+    "%GCC%" -c -O3 -fPIC -D_WIN32 -o noise.o noise.c || goto :err
+    "%GCC%" -c -O3 -fPIC -D_WIN32 -o biomes.o biomes.c || goto :err
+    "%GCC%" -c -O3 -fPIC -D_WIN32 -o layers.o layers.c || goto :err
+    "%GCC%" -c -O3 -fPIC -D_WIN32 -o biomenoise.o biomenoise.c || goto :err
+    "%GCC%" -c -O3 -fPIC -D_WIN32 -o generator.o generator.c || goto :err
+    "%GCC%" -c -O3 -fPIC -D_WIN32 -o finders.o finders.c || goto :err
+    "%GCC%" -c -O3 -fPIC -D_WIN32 -o util.o util.c || goto :err
+    "%GCC%" -c -O3 -fPIC -D_WIN32 -o quadbase.o quadbase.c || goto :err
+    "%AR%" cr libcubiomes.a *.o
     cd ..
 )
 echo    -- building scanner_core.dll ...
-gcc -O3 -fPIC -shared -o scanner_core.dll scanner_core.c cubiomes\libcubiomes.a -lm -lpthread || goto :err
+"%GCC%" -O3 -fPIC -shared -o scanner_core.dll scanner_core.c cubiomes\libcubiomes.a -lm -lpthread || goto :err
 cd ..
 
 echo [4/5] Installing Python dependencies ...
@@ -106,10 +107,10 @@ exit /b 0
 
 :dlfail
 echo.
-echo [DOWNLOAD FAILED] Could not download MinGW-w64.
-echo   - Check your internet connection (GitHub may need a proxy).
-echo   - Or download the zip manually, extract so that you have:
+echo [DOWNLOAD FAILED] Could not find or download MinGW-w64 gcc.
+echo   - If you already downloaded it manually, make sure the path is:
 echo       .\tools\mingw64\bin\gcc.exe
+echo   - Or download the zip, extract it so that the above path exists,
 echo     then re-run this script.
 echo   - Direct link:
 echo     https://github.com/brechtsanders/winlibs_mingw/releases/download/16.2.0posix-14.0.0-ucrt-r1/winlibs-x86_64-posix-seh-gcc-16.2.0-mingw-w64ucrt-14.0.0-r1.zip
