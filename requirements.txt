@@ -1,0 +1,9 @@
+# 全自动智能 MC Java 种子扫描系统 —— Python 依赖
+# 安装: pip install -r requirements.txt
+# 说明: C 核心（cubiomes + scanner_core）需先用 csrc/build.sh（Linux/macOS）
+#       或 csrc/build_windows.bat（Windows，需 MinGW-w64）编译。
+
+PyQt5>=5.15
+psutil>=5.9
+numpy>=1.24          # 可选，评分/数据统计加速
+pyinstaller>=6.0     # 可选，仅打包 EXE 时需要

@@ -1,0 +1,28 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# ---- 运行期数据（首次运行自动生成）----
+data/
+*.db
+*.db-journal
+
+# ---- 构建产物 ----
+build/
+dist/
+*.spec
+csrc/*.o
+csrc/*.so
+csrc/*.dll
+csrc/cubiomes/libcubiomes.a
+tools/
+
+# ---- IDE / 系统 ----
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
