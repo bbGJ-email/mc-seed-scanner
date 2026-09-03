@@ -66,9 +66,10 @@ if not exist "%GCC%" (
 
 echo [3/5] Building C core (cubiomes + scanner_core.dll) ...
 cd csrc
-if not exist cubiomes\libcubiomes.a (
-    echo    -- building cubiomes static library ...
-    cd cubiomes
+echo    -- rebuilding cubiomes static library (forces -U_FORTIFY_SOURCE) ...
+cd cubiomes
+del /q *.o 2>nul
+del /q libcubiomes.a 2>nul
     "%GCC%" -c -O3 -fPIC -U_FORTIFY_SOURCE -D_WIN32 -o noise.o noise.c || goto :err
     "%GCC%" -c -O3 -fPIC -U_FORTIFY_SOURCE -D_WIN32 -o biomes.o biomes.c || goto :err
     "%GCC%" -c -O3 -fPIC -U_FORTIFY_SOURCE -D_WIN32 -o layers.o layers.c || goto :err
@@ -79,7 +80,6 @@ if not exist cubiomes\libcubiomes.a (
     "%GCC%" -c -O3 -fPIC -U_FORTIFY_SOURCE -D_WIN32 -o quadbase.o quadbase.c || goto :err
     "%AR%" cr libcubiomes.a *.o
     cd ..
-)
 echo    -- building scanner_core.dll ...
 "%GCC%" -O3 -fPIC -U_FORTIFY_SOURCE -shared -o scanner_core.dll scanner_core.c cubiomes\libcubiomes.a -lm -static-libgcc -Wl,-Bstatic -lpthread -Wl,-Bdynamic || goto :err
 cd ..
